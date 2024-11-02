@@ -12,8 +12,8 @@ SUPERVISOR_VERSION = "99.9.9dev"
 SERVER_SOFTWARE = f"HomeAssistantSupervisor/{SUPERVISOR_VERSION} aiohttp/{aiohttpversion} Python/{systemversion[0]}.{systemversion[1]}"
 
 URL_HASSIO_ADDONS = "https://gitee.com/smart-assistant/addons"
-URL_HASSIO_APPARMOR = "https://gitee.com/smart-assistant/version/raw/main/apparmor_{channel}.txt"
-URL_HASSIO_VERSION = "https://gitee.com/smart-assistant/version/raw/main/{channel}.json"
+URL_HASSIO_APPARMOR = "https://tiyicn.github.io/version/apparmor_{channel}.txt"
+URL_HASSIO_VERSION = "https://tiyicn.github.io/version/{channel}.json"
 
 SUPERVISOR_DATA = Path("/data")
 
