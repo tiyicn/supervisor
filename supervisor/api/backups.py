@@ -61,6 +61,8 @@ from .utils import api_process, api_validate
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
+ALL_ADDONS_FLAG = "ALL"
+
 RE_SLUGIFY_NAME = re.compile(r"[^A-Za-z0-9]+")
 RE_BACKUP_FILENAME = re.compile(r"^[^\\\/]+\.tar$")
 
@@ -81,6 +83,7 @@ SCHEMA_RESTORE_FULL = vol.Schema(
     {
         vol.Optional(ATTR_PASSWORD): vol.Maybe(str),
         vol.Optional(ATTR_BACKGROUND, default=False): vol.Boolean(),
+        vol.Optional(ATTR_LOCATION): vol.Maybe(str),
     }
 )
 
@@ -108,7 +111,9 @@ SCHEMA_BACKUP_FULL = vol.Schema(
 
 SCHEMA_BACKUP_PARTIAL = SCHEMA_BACKUP_FULL.extend(
     {
-        vol.Optional(ATTR_ADDONS): vol.All([str], vol.Unique()),
+        vol.Optional(ATTR_ADDONS): vol.Or(
+            ALL_ADDONS_FLAG, vol.All([str], vol.Unique())
+        ),
         vol.Optional(ATTR_FOLDERS): vol.All([vol.In(_ALL_FOLDERS)], vol.Unique()),
         vol.Optional(ATTR_HOMEASSISTANT): vol.Boolean(),
     }
@@ -352,6 +357,9 @@ class APIBackups(CoreSysAttributes):
             if locations:
                 body[ATTR_ADDITIONAL_LOCATIONS] = locations
 
+        if body.get(ATTR_ADDONS) == ALL_ADDONS_FLAG:
+            body[ATTR_ADDONS] = list(self.sys_addons.local)
+
         background = body.pop(ATTR_BACKGROUND)
         backup_task, job_id = await self._background_backup_task(
             self.sys_backups.do_backup_partial, **body
@@ -372,8 +380,10 @@ class APIBackups(CoreSysAttributes):
     async def restore_full(self, request: web.Request):
         """Full restore of a backup."""
         backup = self._extract_slug(request)
-        self._validate_cloud_backup_location(request, backup.location)
         body = await api_validate(SCHEMA_RESTORE_FULL, request)
+        self._validate_cloud_backup_location(
+            request, body.get(ATTR_LOCATION, backup.location)
+        )
         background = body.pop(ATTR_BACKGROUND)
         restore_task, job_id = await self._background_backup_task(
             self.sys_backups.do_restore_full, backup, **body
@@ -390,8 +400,10 @@ class APIBackups(CoreSysAttributes):
     async def restore_partial(self, request: web.Request):
         """Partial restore a backup."""
         backup = self._extract_slug(request)
-        self._validate_cloud_backup_location(request, backup.location)
         body = await api_validate(SCHEMA_RESTORE_PARTIAL, request)
+        self._validate_cloud_backup_location(
+            request, body.get(ATTR_LOCATION, backup.location)
+        )
         background = body.pop(ATTR_BACKGROUND)
         restore_task, job_id = await self._background_backup_task(
             self.sys_backups.do_restore_partial, backup, **body

@@ -33,7 +33,7 @@ jobs:
           python-version: ${{ env.DEFAULT_PYTHON }}
       - name: Restore Python virtual environment
         id: cache-venv
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: venv
           key: |
@@ -47,7 +47,7 @@ jobs:
           pip install -r requirements.txt -r requirements_tests.txt
       - name: Restore pre-commit environment from cache
         id: cache-precommit
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: ${{ env.PRE_COMMIT_CACHE }}
           lookup-only: true
@@ -75,7 +75,7 @@ jobs:
           python-version: ${{ needs.prepare.outputs.python-version }}
       - name: Restore Python virtual environment
         id: cache-venv
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: venv
           key: |
@@ -87,7 +87,7 @@ jobs:
           exit 1
       - name: Restore pre-commit environment from cache
         id: cache-precommit
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: ${{ env.PRE_COMMIT_CACHE }}
           key: |
@@ -118,7 +118,7 @@ jobs:
           python-version: ${{ needs.prepare.outputs.python-version }}
       - name: Restore Python virtual environment
         id: cache-venv
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: venv
           key: |
@@ -130,7 +130,7 @@ jobs:
           exit 1
       - name: Restore pre-commit environment from cache
         id: cache-precommit
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: ${{ env.PRE_COMMIT_CACHE }}
           key: |
@@ -176,7 +176,7 @@ jobs:
           python-version: ${{ needs.prepare.outputs.python-version }}
       - name: Restore Python virtual environment
         id: cache-venv
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: venv
           key: |
@@ -188,7 +188,7 @@ jobs:
           exit 1
       - name: Restore pre-commit environment from cache
         id: cache-precommit
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: ${{ env.PRE_COMMIT_CACHE }}
           key: |
@@ -220,7 +220,7 @@ jobs:
           python-version: ${{ needs.prepare.outputs.python-version }}
       - name: Restore Python virtual environment
         id: cache-venv
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: venv
           key: |
@@ -232,7 +232,7 @@ jobs:
           exit 1
       - name: Restore pre-commit environment from cache
         id: cache-precommit
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: ${{ env.PRE_COMMIT_CACHE }}
           key: |
@@ -264,7 +264,7 @@ jobs:
           python-version: ${{ needs.prepare.outputs.python-version }}
       - name: Restore Python virtual environment
         id: cache-venv
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: venv
           key: |
@@ -274,6 +274,10 @@ jobs:
         run: |
           echo "Failed to restore Python virtual environment from cache"
           exit 1
+      - name: Install additional system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpulse0
       - name: Register pylint problem matcher
         run: |
           echo "::add-matcher::.github/workflows/matchers/pylint.json"
@@ -300,7 +304,7 @@ jobs:
           cosign-release: "v2.4.0"
       - name: Restore Python virtual environment
         id: cache-venv
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: venv
           key: |
@@ -335,7 +339,7 @@ jobs:
             -o console_output_style=count \
             tests
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4.4.3
+        uses: actions/upload-artifact@v4.5.0
         with:
           name: coverage-${{ matrix.python-version }}
           path: .coverage
@@ -355,7 +359,7 @@ jobs:
           python-version: ${{ needs.prepare.outputs.python-version }}
       - name: Restore Python virtual environment
         id: cache-venv
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4.2.0
         with:
           path: venv
           key: |
@@ -374,4 +378,4 @@ jobs:
           coverage report
           coverage xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4.6.0
+        uses: codecov/codecov-action@v5.1.2
