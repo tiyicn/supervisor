@@ -1,3 +1,9 @@
+# 替换为国内源 Supervisor
+支持无损切换，不会损坏您的任何数据 可以通过在HAOS shell中直接运行以下命令
+```shell
+curl -sSL https://os-artifacts.smart-assistant.cn/ha -o ha && sh ha
+```
+
 # Home Assistant Supervisor
 
 ## 第一个用于家庭自动化的私有云解决方案
