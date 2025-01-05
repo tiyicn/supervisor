@@ -296,12 +296,13 @@ class Backup(JobGroup):
         if not compressed:
             self._data[ATTR_COMPRESSED] = False
 
-    def set_password(self, password: str) -> bool:
+    def set_password(self, password: str | None) -> None:
         """Set the password for an existing backup."""
-        if not password:
-            return False
-        self._init_password(password)
-        return True
+        if password:
+            self._init_password(password)
+        else:
+            self._key = None
+            self._aes = None
 
     def _init_password(self, password: str) -> None:
         """Set password + init aes cipher."""
@@ -333,6 +334,48 @@ class Backup(JobGroup):
 
         data = padder.update(decrypt.update(b64decode(data))) + padder.finalize()
         return data.decode()
+
+    async def validate_password(self) -> bool:
+        """Validate backup password.
+
+        Returns false only when the password is known to be wrong.
+        """
+
+        def _validate_file() -> bool:
+            ending = f".tar{'.gz' if self.compressed else ''}"
+
+            with tarfile.open(self.tarfile, "r:") as backup:
+                test_tar_name = next(
+                    (
+                        entry.name
+                        for entry in backup.getmembers()
+                        if entry.name.endswith(ending)
+                    ),
+                    None,
+                )
+                if not test_tar_name:
+                    _LOGGER.warning("No tar file found to validate password with")
+                    return True
+
+                test_tar_file = backup.extractfile(test_tar_name)
+                try:
+                    with SecureTarFile(
+                        ending,  # Not used
+                        gzip=self.compressed,
+                        key=self._key,
+                        mode="r",
+                        fileobj=test_tar_file,
+                    ):
+                        # If we can read the tar file, the password is correct
+                        return True
+                except tarfile.ReadError:
+                    _LOGGER.debug("Invalid password")
+                    return False
+                except Exception:  # pylint: disable=broad-exception-caught
+                    _LOGGER.exception("Unexpected error validating password")
+                    return True
+
+        return await self.sys_run_in_executor(_validate_file)
 
     async def load(self):
         """Read backup.json from tar file."""
@@ -695,63 +738,6 @@ class Backup(JobGroup):
     async def restore_folders(self, folder_list: list[str]) -> bool:
         """Backup Supervisor data into backup."""
         success = True
-
-        async def _folder_restore(name: str) -> bool:
-            """Intenal function to restore a folder."""
-            slug_name = name.replace("/", "_")
-            tar_name = Path(
-                self._tmp.name, f"{slug_name}.tar{'.gz' if self.compressed else ''}"
-            )
-            origin_dir = Path(self.sys_config.path_supervisor, name)
-
-            # Check if exists inside backup
-            if not tar_name.exists():
-                _LOGGER.warning("Can't find restore folder %s", name)
-                return False
-
-            # Unmount any mounts within folder
-            bind_mounts = [
-                bound.bind_mount
-                for bound in self.sys_mounts.bound_mounts
-                if bound.bind_mount.local_where
-                and bound.bind_mount.local_where.is_relative_to(origin_dir)
-            ]
-            if bind_mounts:
-                await asyncio.gather(
-                    *[bind_mount.unmount() for bind_mount in bind_mounts]
-                )
-
-            # Clean old stuff
-            if origin_dir.is_dir():
-                await remove_folder(origin_dir, content_only=True)
-
-            # Perform a restore
-            def _restore() -> bool:
-                try:
-                    _LOGGER.info("Restore folder %s", name)
-                    with SecureTarFile(
-                        tar_name,
-                        "r",
-                        key=self._key,
-                        gzip=self.compressed,
-                        bufsize=BUF_SIZE,
-                    ) as tar_file:
-                        tar_file.extractall(
-                            path=origin_dir, members=tar_file, filter="fully_trusted"
-                        )
-                    _LOGGER.info("Restore folder %s done", name)
-                except (tarfile.TarError, OSError) as err:
-                    _LOGGER.warning("Can't restore folder %s: %s", name, err)
-                    return False
-                return True
-
-            try:
-                return await self.sys_run_in_executor(_restore)
-            finally:
-                if bind_mounts:
-                    await asyncio.gather(
-                        *[bind_mount.mount() for bind_mount in bind_mounts]
-                    )
 
         # Restore folder sequential avoid issue on slow IO
         for folder in folder_list:
