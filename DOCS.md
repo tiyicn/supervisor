@@ -68,14 +68,3 @@ ghcr.io/home-assistant/amd64-hassio-supervisor:latest
 后面版本号2024.12.3根据你下载的版本对应，修改完后可以删除刚才拉取的镜像
    ![](/images/portainer3.png)
 
-## About
-
-This add-on allows you to log in to your Home Assistant instance using
-SSH or a Web Terminal, giving you to access your folders and
-also includes a command-line tool to do things like restart, update,
-and check your instance.
-
-This is an enhanced version of the provided
-[SSH add-on by Home Assistant][hass-ssh] and focuses on security,
-usability, flexibility and also provides access using a web interface.
-
