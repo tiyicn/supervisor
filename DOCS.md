@@ -12,6 +12,7 @@ curl -sSL https://os-artifacts.smart-assistant.cn/ha -o ha && sh ha
 ```
 ### 或
 可以通过在HAOS Shell的根访问直接运行以下命令
+
    ![](/images/shell2.png)
 ```shell
 cd /mnt/data/
