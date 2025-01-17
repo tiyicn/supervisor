@@ -1,4 +1,0 @@
-[submodule "home-assistant-polymer"]
-	path = home-assistant-polymer
-	url = https://gitee.com/smart-assistant/frontend
-	branch = dev
