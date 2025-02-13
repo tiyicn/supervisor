@@ -227,11 +227,7 @@ class BackupManager(FileConfiguration, JobGroup):
         """
         return self.reload()
 
-    async def reload(
-        self,
-        location: LOCATION_TYPE | type[DEFAULT] = DEFAULT,
-        filename: str | None = None,
-    ) -> bool:
+    async def reload(self, location: str | None | type[DEFAULT] = DEFAULT) -> bool:
         """Load exists backups."""
 
         async def _load_backup(location_name: str | None, tar_file: Path) -> bool:
@@ -258,22 +254,32 @@ class BackupManager(FileConfiguration, JobGroup):
 
             return False
 
-        if location != DEFAULT and filename:
-            return await _load_backup(
-                self._get_location_name(location),
-                self._get_base_path(location) / filename,
-            )
+        # Single location refresh clears out just that part of the cache and rebuilds it
+        if location != DEFAULT:
+            locations = {location: self.backup_locations[location]}
+            for backup in self.list_backups:
+                if location in backup.all_locations:
+                    del backup.all_locations[location]
+        else:
+            locations = self.backup_locations
+            self._backups = {}
 
-        self._backups = {}
         tasks = [
             self.sys_create_task(_load_backup(_location, tar_file))
-            for _location, path in self.backup_locations.items()
+            for _location, path in locations.items()
             for tar_file in self._list_backup_files(path)
         ]
 
         _LOGGER.info("Found %d backup files", len(tasks))
         if tasks:
             await asyncio.wait(tasks)
+
+        # Remove any backups with no locations from cache (only occurs in single location refresh)
+        if location != DEFAULT:
+            for backup in list(self.list_backups):
+                if not backup.all_locations:
+                    del self._backups[backup.slug]
+
         return True
 
     def remove(
@@ -298,6 +304,7 @@ class BackupManager(FileConfiguration, JobGroup):
                 backup_tarfile.unlink()
                 del backup.all_locations[location]
             except FileNotFoundError as err:
+                self.sys_create_task(self.reload(location))
                 raise BackupFileNotFoundError(
                     f"Cannot delete backup at {backup_tarfile.as_posix()}, file does not exist!",
                     _LOGGER.error,
@@ -701,7 +708,7 @@ class BackupManager(FileConfiguration, JobGroup):
                         _job_override__cleanup=False
                     )
 
-    async def _validate_location_password(
+    async def _set_location_password(
         self,
         backup: Backup,
         password: str | None = None,
@@ -713,17 +720,15 @@ class BackupManager(FileConfiguration, JobGroup):
                 f"Backup {backup.slug} does not exist in {location}", _LOGGER.error
             )
 
-        if (
-            location == DEFAULT
-            and backup.protected
-            or location != DEFAULT
-            and backup.all_locations[location][ATTR_PROTECTED]
-        ):
+        location = location if location != DEFAULT else backup.location
+        if backup.all_locations[location][ATTR_PROTECTED]:
             backup.set_password(password)
-            if not await backup.validate_password():
+            if not await backup.validate_password(location):
                 raise BackupInvalidError(
                     f"Invalid password for backup {backup.slug}", _LOGGER.error
                 )
+        else:
+            backup.set_password(None)
 
     @Job(
         name=JOB_FULL_RESTORE,
@@ -753,7 +758,7 @@ class BackupManager(FileConfiguration, JobGroup):
                 f"{backup.slug} is only a partial backup!", _LOGGER.error
             )
 
-        await self._validate_location_password(backup, password, location)
+        await self._set_location_password(backup, password, location)
 
         if backup.supervisor_version > self.sys_supervisor.version:
             raise BackupInvalidError(
@@ -818,7 +823,7 @@ class BackupManager(FileConfiguration, JobGroup):
             folder_list.remove(FOLDER_HOMEASSISTANT)
             homeassistant = True
 
-        await self._validate_location_password(backup, password, location)
+        await self._set_location_password(backup, password, location)
 
         if backup.homeassistant is None and homeassistant:
             raise BackupInvalidError(
