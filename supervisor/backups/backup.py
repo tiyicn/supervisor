@@ -52,7 +52,12 @@ from ..const import (
     CRYPTO_AES128,
 )
 from ..coresys import CoreSys
-from ..exceptions import AddonsError, BackupError, BackupInvalidError
+from ..exceptions import (
+    AddonsError,
+    BackupError,
+    BackupFileNotFoundError,
+    BackupInvalidError,
+)
 from ..jobs.const import JOB_GROUP_BACKUP
 from ..jobs.decorator import Job
 from ..jobs.job_group import JobGroup
@@ -157,12 +162,12 @@ class Backup(JobGroup):
 
     @property
     def repositories(self) -> list[str]:
-        """Return backup date."""
+        """Return add-on store repositories."""
         return self._data[ATTR_REPOSITORIES]
 
     @repositories.setter
     def repositories(self, value: list[str]) -> None:
-        """Set backup date."""
+        """Set add-on store repositories."""
         self._data[ATTR_REPOSITORIES] = value
 
     @property
@@ -281,7 +286,7 @@ class Backup(JobGroup):
                 or k not in other._data
                 or self._data[k] != other._data[k]
             ):
-                _LOGGER.debug(
+                _LOGGER.info(
                     "Backup %s and %s not equal because %s field has different value: %s and %s",
                     self.slug,
                     other.slug,
@@ -513,7 +518,7 @@ class Backup(JobGroup):
             else self.all_locations[location][ATTR_PATH]
         )
         if not backup_tarfile.is_file():
-            raise BackupError(
+            raise BackupFileNotFoundError(
                 f"Cannot open backup at {backup_tarfile.as_posix()}, file does not exist!",
                 _LOGGER.error,
             )
