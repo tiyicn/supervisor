@@ -12,6 +12,8 @@ from shutil import copy
 from ..addons.addon import Addon
 from ..const import (
     ATTR_DAYS_UNTIL_STALE,
+    ATTR_PATH,
+    ATTR_PROTECTED,
     FILE_HASSIO_BACKUPS,
     FOLDER_HOMEASSISTANT,
     CoreState,
@@ -184,6 +186,7 @@ class BackupManager(FileConfiguration, JobGroup):
     def _create_backup(
         self,
         name: str,
+        filename: str | None,
         sys_type: BackupType,
         password: str | None,
         compressed: bool = True,
@@ -196,7 +199,11 @@ class BackupManager(FileConfiguration, JobGroup):
         """
         date_str = utcnow().isoformat()
         slug = create_slug(name, date_str)
-        tar_file = Path(self._get_base_path(location), f"{slug}.tar")
+
+        if filename:
+            tar_file = Path(self._get_base_path(location), Path(filename).name)
+        else:
+            tar_file = Path(self._get_base_path(location), f"{slug}.tar")
 
         # init object
         backup = Backup(self.coresys, tar_file, slug, self._get_location_name(location))
@@ -226,9 +233,9 @@ class BackupManager(FileConfiguration, JobGroup):
     ) -> bool:
         """Load exists backups."""
 
-        async def _load_backup(location: str | None, tar_file: Path) -> bool:
+        async def _load_backup(location_name: str | None, tar_file: Path) -> bool:
             """Load the backup."""
-            backup = Backup(self.coresys, tar_file, "temp", location)
+            backup = Backup(self.coresys, tar_file, "temp", location_name)
             if await backup.load():
                 if backup.slug in self._backups:
                     try:
@@ -244,7 +251,7 @@ class BackupManager(FileConfiguration, JobGroup):
 
                 else:
                     self._backups[backup.slug] = Backup(
-                        self.coresys, tar_file, backup.slug, location, backup.data
+                        self.coresys, tar_file, backup.slug, location_name, backup.data
                     )
                 return True
 
@@ -286,7 +293,7 @@ class BackupManager(FileConfiguration, JobGroup):
         )
         for location in targets:
             try:
-                backup.all_locations[location].unlink()
+                backup.all_locations[location][ATTR_PATH].unlink()
                 del backup.all_locations[location]
             except OSError as err:
                 if err.errno == errno.EBADMSG and location in {
@@ -340,17 +347,25 @@ class BackupManager(FileConfiguration, JobGroup):
             return all_locations
 
         try:
-            backup.all_locations.update(
-                await self.sys_run_in_executor(copy_to_additional_locations)
+            all_new_locations = await self.sys_run_in_executor(
+                copy_to_additional_locations
             )
         except BackupDataDiskBadMessageError:
             self.sys_resolution.unhealthy = UnhealthyReason.OSERROR_BAD_MESSAGE
             raise
 
+        backup.all_locations.update(
+            {
+                loc: {ATTR_PATH: path, ATTR_PROTECTED: backup.protected}
+                for loc, path in all_new_locations.items()
+            }
+        )
+
     @Job(name="backup_manager_import_backup")
     async def import_backup(
         self,
         tar_file: Path,
+        filename: str | None = None,
         location: LOCATION_TYPE = None,
         additional_locations: list[LOCATION_TYPE] | None = None,
     ) -> Backup | None:
@@ -362,9 +377,13 @@ class BackupManager(FileConfiguration, JobGroup):
             return None
 
         # Move backup to destination folder
-        tar_origin = Path(self._get_base_path(location), f"{backup.slug}.tar")
+        if filename:
+            tar_file = Path(self._get_base_path(location), Path(filename).name)
+        else:
+            tar_file = Path(self._get_base_path(location), f"{backup.slug}.tar")
+
         try:
-            backup.tarfile.rename(tar_origin)
+            backup.tarfile.rename(tar_file)
 
         except OSError as err:
             if err.errno == errno.EBADMSG and location in {LOCATION_CLOUD_BACKUP, None}:
@@ -373,7 +392,13 @@ class BackupManager(FileConfiguration, JobGroup):
             return None
 
         # Load new backup
-        backup = Backup(self.coresys, tar_origin, backup.slug, location, backup.data)
+        backup = Backup(
+            self.coresys,
+            tar_file,
+            backup.slug,
+            self._get_location_name(location),
+            backup.data,
+        )
         if not await backup.load():
             # Remove invalid backup from location it was moved to
             backup.tarfile.unlink()
@@ -482,6 +507,7 @@ class BackupManager(FileConfiguration, JobGroup):
     async def do_backup_full(
         self,
         name: str = "",
+        filename: str | None = None,
         *,
         password: str | None = None,
         compressed: bool = True,
@@ -500,7 +526,7 @@ class BackupManager(FileConfiguration, JobGroup):
             )
 
         backup = self._create_backup(
-            name, BackupType.FULL, password, compressed, location, extra
+            name, filename, BackupType.FULL, password, compressed, location, extra
         )
 
         _LOGGER.info("Creating new full backup with slug %s", backup.slug)
@@ -526,6 +552,7 @@ class BackupManager(FileConfiguration, JobGroup):
     async def do_backup_partial(
         self,
         name: str = "",
+        filename: str | None = None,
         *,
         addons: list[str] | None = None,
         folders: list[str] | None = None,
@@ -558,7 +585,7 @@ class BackupManager(FileConfiguration, JobGroup):
             _LOGGER.error("Nothing to create backup for")
 
         backup = self._create_backup(
-            name, BackupType.PARTIAL, password, compressed, location, extra
+            name, filename, BackupType.PARTIAL, password, compressed, location, extra
         )
 
         _LOGGER.info("Creating new partial backup with slug %s", backup.slug)
@@ -669,6 +696,30 @@ class BackupManager(FileConfiguration, JobGroup):
                         _job_override__cleanup=False
                     )
 
+    async def _validate_location_password(
+        self,
+        backup: Backup,
+        password: str | None = None,
+        location: str | None | type[DEFAULT] = DEFAULT,
+    ) -> None:
+        """Validate location and password for backup, raise if invalid."""
+        if location != DEFAULT and location not in backup.all_locations:
+            raise BackupInvalidError(
+                f"Backup {backup.slug} does not exist in {location}", _LOGGER.error
+            )
+
+        if (
+            location == DEFAULT
+            and backup.protected
+            or location != DEFAULT
+            and backup.all_locations[location][ATTR_PROTECTED]
+        ):
+            backup.set_password(password)
+            if not await backup.validate_password():
+                raise BackupInvalidError(
+                    f"Invalid password for backup {backup.slug}", _LOGGER.error
+                )
+
     @Job(
         name=JOB_FULL_RESTORE,
         conditions=[
@@ -697,12 +748,7 @@ class BackupManager(FileConfiguration, JobGroup):
                 f"{backup.slug} is only a partial backup!", _LOGGER.error
             )
 
-        if backup.protected:
-            backup.set_password(password)
-            if not await backup.validate_password():
-                raise BackupInvalidError(
-                    f"Invalid password for backup {backup.slug}", _LOGGER.error
-                )
+        await self._validate_location_password(backup, password, location)
 
         if backup.supervisor_version > self.sys_supervisor.version:
             raise BackupInvalidError(
@@ -767,12 +813,7 @@ class BackupManager(FileConfiguration, JobGroup):
             folder_list.remove(FOLDER_HOMEASSISTANT)
             homeassistant = True
 
-        if backup.protected:
-            backup.set_password(password)
-            if not await backup.validate_password():
-                raise BackupInvalidError(
-                    f"Invalid password for backup {backup.slug}", _LOGGER.error
-                )
+        await self._validate_location_password(backup, password, location)
 
         if backup.homeassistant is None and homeassistant:
             raise BackupInvalidError(
