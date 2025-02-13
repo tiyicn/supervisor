@@ -215,8 +215,6 @@ class BackupManager(FileConfiguration, JobGroup):
 
         self._change_stage(BackupJobStage.ADDON_REPOSITORIES, backup)
         backup.store_repositories()
-        self._change_stage(BackupJobStage.DOCKER_CONFIG, backup)
-        backup.store_dockerconfig()
 
         return backup
 
@@ -230,13 +228,15 @@ class BackupManager(FileConfiguration, JobGroup):
     async def reload(self, location: str | None | type[DEFAULT] = DEFAULT) -> bool:
         """Load exists backups."""
 
+        backups: dict[str, Backup] = {}
+
         async def _load_backup(location_name: str | None, tar_file: Path) -> bool:
             """Load the backup."""
             backup = Backup(self.coresys, tar_file, "temp", location_name)
             if await backup.load():
-                if backup.slug in self._backups:
+                if backup.slug in backups:
                     try:
-                        self._backups[backup.slug].consolidate(backup)
+                        backups[backup.slug].consolidate(backup)
                     except BackupInvalidError as err:
                         _LOGGER.error(
                             "Ignoring backup %s in %s due to: %s",
@@ -247,23 +247,18 @@ class BackupManager(FileConfiguration, JobGroup):
                         return False
 
                 else:
-                    self._backups[backup.slug] = Backup(
+                    backups[backup.slug] = Backup(
                         self.coresys, tar_file, backup.slug, location_name, backup.data
                     )
                 return True
 
             return False
 
-        # Single location refresh clears out just that part of the cache and rebuilds it
-        if location != DEFAULT:
-            locations = {location: self.backup_locations[location]}
-            for backup in self.list_backups:
-                if location in backup.all_locations:
-                    del backup.all_locations[location]
-        else:
-            locations = self.backup_locations
-            self._backups = {}
-
+        locations = (
+            self.backup_locations
+            if location == DEFAULT
+            else {location: self.backup_locations[location]}
+        )
         tasks = [
             self.sys_create_task(_load_backup(_location, tar_file))
             for _location, path in locations.items()
@@ -274,10 +269,28 @@ class BackupManager(FileConfiguration, JobGroup):
         if tasks:
             await asyncio.wait(tasks)
 
-        # Remove any backups with no locations from cache (only occurs in single location refresh)
-        if location != DEFAULT:
-            for backup in list(self.list_backups):
-                if not backup.all_locations:
+        # For a full reload, replace our cache with new one
+        if location == DEFAULT:
+            self._backups = backups
+            return True
+
+        # For a location reload, merge new cache in with existing
+        for backup in list(self.list_backups):
+            if backup.slug in backups:
+                try:
+                    backup.consolidate(backups[backup.slug])
+                except BackupInvalidError as err:
+                    _LOGGER.error(
+                        "Ignoring backup %s in %s due to: %s",
+                        backup.slug,
+                        location,
+                        err,
+                    )
+
+            elif location in backup.all_locations:
+                if len(backup.all_locations) > 1:
+                    del backup.all_locations[location]
+                else:
                     del self._backups[backup.slug]
 
         return True
@@ -640,10 +653,6 @@ class BackupManager(FileConfiguration, JobGroup):
         try:
             task_hass: asyncio.Task | None = None
             async with backup.open(location):
-                # Restore docker config
-                self._change_stage(RestoreJobStage.DOCKER_CONFIG, backup)
-                backup.restore_dockerconfig(replace)
-
                 # Process folders
                 if folder_list:
                     self._change_stage(RestoreJobStage.FOLDERS, backup)
