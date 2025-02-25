@@ -299,7 +299,7 @@ jobs:
         with:
           python-version: ${{ needs.prepare.outputs.python-version }}
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.8.0
+        uses: sigstore/cosign-installer@v3.8.1
         with:
           cosign-release: "v2.4.0"
       - name: Restore Python virtual environment
@@ -339,7 +339,7 @@ jobs:
             -o console_output_style=count \
             tests
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4.6.0
+        uses: actions/upload-artifact@v4.6.1
         with:
           name: coverage-${{ matrix.python-version }}
           path: .coverage
